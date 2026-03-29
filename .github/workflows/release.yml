@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    paths:
+      - "FRONTEND_TAG"
+      - "BACKEND_TAG"
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read tags
+        id: tags
+        run: |
+          echo "frontend=$(cat FRONTEND_TAG 2>/dev/null || echo latest)" >> $GITHUB_OUTPUT
+          echo "backend=$(cat BACKEND_TAG 2>/dev/null || echo latest)"   >> $GITHUB_OUTPUT
+
+      - name: Update .env.example
+        run: |
+          sed -i "s/^FRONTEND_TAG=.*/FRONTEND_TAG=${{ steps.tags.outputs.frontend }}/" .env.example
+          sed -i "s/^BACKEND_TAG=.*/BACKEND_TAG=${{ steps.tags.outputs.backend }}/"   .env.example
+
+      - uses: EndBug/add-and-commit@v9
+        with:
+          message: "release: fe=${{ steps.tags.outputs.frontend }} be=${{ steps.tags.outputs.backend }}"
+          add: ".env.example"
+
+      - name: Create GitHub Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fe   = '${{ steps.tags.outputs.frontend }}';
+            const be   = '${{ steps.tags.outputs.backend }}';
+            const date = new Date().toISOString().slice(0, 10);
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              tag_name: `release-${date}-${context.sha.substring(0,7)}`,
+              name: `Release ${date}`,
+              body: [
+                '### Образы',
+                '| Сервис | Image |',
+                '|--------|-------|',
+                `| frontend | \`ghcr.io/${{ github.repository_owner }}/frontend:${fe}\` |`,
+                `| backend  | \`ghcr.io/${{ github.repository_owner }}/backend:${be}\` |`,
+                '',
+                '### Обновить',
+                '```bash',
+                'docker compose pull && docker compose up -d',
+                '```'
+              ].join('\n'),
+              draft: false,
+              prerelease: false
+            });
